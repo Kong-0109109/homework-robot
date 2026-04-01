@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>邏輯機器人大冒險</title>
+    <style>
+        :root {
+            --move-color: #388E3C;
+            --turn-color: #1565C0;
+            --func-color: #6A1B9A;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding-bottom: 40px;
+            transition: background 0.6s, color 0.4s;
+        }
+        body.day   { background: #87CEEB; color: #1a1a2e; }
+        body.night { background: #1c3a5e; color: #d4e8f7; }
+
+        /* ── HEADER ── */
+        header {
+            width: 100%;
+            text-align: center;
+            padding: 16px 0 8px;
+            position: relative;
+        }
+        header h2 { font-size: 22px; font-weight: 700; }
+        header p  { font-size: 13px; opacity: 0.7; margin-top: 3px; }
+
+        #sun-moon {
+            position: absolute;
+            right: 20px; top: 14px;
+            font-size: 36px;
+            line-height: 1;
+            transition: opacity 0.8s;
+        }
+
+        /* ── PROGRESS PIPS ── */
+        #progress-bar {
+            display: flex;
+            gap: 7px;
+            margin: 6px 0 14px;
+        }
+        .pip {
+            width: 30px; height: 7px;
+            border-radius: 4px;
+            background: rgba(128,128,128,0.3);
+            transition: background 0.5s;
+        }
+        .pip.done   { background: #4CAF50; }
+        .pip.active { background: #FFD700; }
+
+        /* ── MAIN LAYOUT ── */
+        #game-container {
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 0 16px;
+        }
+
+        /* ── PANEL (toolbox / workspace) ── */
+        .panel {
+            background: rgba(255,255,255,0.88);
+            border-radius: 12px;
+            padding: 14px;
+            width: 162px;
+            color: #222;
+        }
+        body.night .panel { background: rgba(30,50,70,0.85); color: #d4e8f7; }
+        .panel-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.6;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        /* ── COMMAND BLOCKS ── */
+        .block {
+            padding: 9px 10px;
+            margin: 5px 0;
+            border-radius: 6px;
+            color: #fff;
+            font-weight: 700;
+            font-size: 13px;
+            text-align: center;
+            cursor: grab;
+            user-select: none;
+            transition: transform 0.1s, opacity 0.15s;
+        }
+        .block:active { cursor: grabbing; transform: scale(0.96); }
+        .move { background: var(--move-color); }
+        .turn { background: var(--turn-color); }
+        .func { background: var(--func-color); }
+
+        /* ── WORKSPACE ── */
+        #workspace {
+            min-height: 290px;
+            background: rgba(0,0,0,0.06);
+            border: 2px dashed rgba(100,100,100,0.4);
+            border-radius: 10px;
+            padding: 8px;
+            width: 162px;
+            position: relative;
+            transition: border-color 0.3s, background 0.3s;
+        }
+        body.night #workspace { background: rgba(255,255,255,0.05); border-color: rgba(180,200,220,0.25); }
+        #workspace.dragover { border-color: #FFD700; background: rgba(255,215,0,0.08); }
+        #workspace .block {
+            cursor: pointer;
+            font-size: 12px;
+            padding: 8px 10px;
+            margin: 4px 0;
+        }
+        #workspace .block:hover { opacity: 0.7; }
+        #workspace .block.executing { outline: 3px solid #FFD700; outline-offset: 1px; }
+        #ws-hint {
+            text-align: center;
+            font-size: 12px;
+            color: inherit;
+            opacity: 0.45;
+            margin: 12px 0 4px;
+            pointer-events: none;
+        }
+        #cmd-count {
+            text-align: center;
+            font-size: 11px;
+            color: inherit;
+            opacity: 0.5;
+            margin-top: 4px;
+        }
+
+        /* ── MAP ── */
+        #map {
+            display: grid;
+            grid-template-columns: repeat(5, 58px);
+            grid-template-rows:    repeat(5, 58px);
+            gap: 2px;
+            background: rgba(0,0,0,0.18);
+            padding: 5px;
+            border-radius: 10px;
+        }
+        .cell {
+            width: 58px; height: 58px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.55);
+            transition: background 0.3s;
+        }
+        body.night .cell { background: rgba(255,255,255,0.18); }
+        .wall  { background: #3d3d52 !important; }
+        body.night .wall { background: #0d1e30 !important; border: 1px solid #0a121d; }
+        .goal  { background: #FFD700 !important; animation: pulse 1.1s ease-in-out infinite; }
+
+        /* ── CONTROLS ── */
+        .controls {
+            margin-top: 14px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-row { display: flex; gap: 10px; }
+        button {
+            padding: 10px 22px;
+            font-size: 14px;
+            font-weight: 700;
+            border-radius: 22px;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            transition: transform 0.1s, filter 0.15s;
+        }
+        button:hover  { filter: brightness(1.1); }
+        button:active { transform: scale(0.96); }
+        button:disabled { filter: none; opacity: 0.4; cursor: not-allowed; }
+        #run-btn   { background: #e53935; }
+        #reset-btn { background: #546e7a; }
+        #goal-hint { font-size: 13px; opacity: 0.75; }
+
+        /* ── HINT STRIP (solution length guide) ── */
+        #level-hint {
+            font-size: 12px;
+            opacity: 0.6;
+            margin-top: 2px;
+        }
+
+        /* ── FLOATING MESSAGE ── */
+        #message {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 26px;
+            font-weight: 700;
+            text-align: center;
+            line-height: 1.45;
+            color: #fff;
+            background: rgba(10,15,25,0.82);
+            padding: 18px 28px;
+            border-radius: 14px;
+            max-width: 78vw;
+            pointer-events: none;
+            display: none;
+            z-index: 100;
+        }
+
+        /* ── ALL-CLEAR SCREEN ── */
+        #complete-screen {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(5,10,20,0.93);
+            z-index: 200;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            text-align: center;
+            padding: 30px;
+        }
+        #complete-screen .trophy { font-size: 72px; margin-bottom: 12px; }
+        #complete-screen h1 { font-size: 40px; margin-bottom: 10px; }
+        #complete-screen p  { font-size: 18px; opacity: 0.85; margin-bottom: 28px; line-height: 1.6; }
+        #play-again-btn {
+            padding: 14px 38px;
+            font-size: 18px;
+            font-weight: 700;
+            background: #4CAF50;
+            border-radius: 26px;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50%       { transform: scale(1.1); }
+        }
+    </style>
+</head>
+<body class="day">
+
+<header>
+    <div id="sun-moon">☀️</div>
+    <h2 id="level-title">關卡 1: 初試身手</h2>
+    <p id="level-hint"></p>
+</header>
+
+<div id="progress-bar"></div>
+
+<div id="game-container">
+
+    <div class="panel" id="toolbox">
+        <div class="panel-title">🧰 指令積木</div>
+        <div class="block move" draggable="true" ondragstart="drag(event)" data-cmd="move">⬆ 前進一步</div>
+        <div class="block turn" draggable="true" ondragstart="drag(event)" data-cmd="left">↺ 左轉 90°</div>
+        <div class="block turn" draggable="true" ondragstart="drag(event)" data-cmd="right">↻ 右轉 90°</div>
+        <div class="block func" draggable="true" ondragstart="drag(event)" data-cmd="wait">⏸ 原地等待</div>
+        <hr style="margin:10px 0; opacity:0.2;">
+        <p style="font-size:11px; opacity:0.55; text-align:center;">點擊指令區塊可移除</p>
+    </div>
+
+    <div id="workspace"
+         ondrop="drop(event)"
+         ondragover="allowDrop(event)"
+         ondragenter="dragEnter(event)"
+         ondragleave="dragLeave(event)">
+        <p id="ws-hint">將指令拖放到此處</p>
+        <p id="cmd-count"></p>
+    </div>
+
+    <div id="map"></div>
+
+</div>
+
+<div class="controls">
+    <div class="btn-row">
+        <button id="run-btn"   onclick="runProgram()">▶ 啟動機器人！</button>
+        <button id="reset-btn" onclick="resetLevel()">↩ 重置</button>
+    </div>
+    <p id="goal-hint">目標：帶機器人走到 🚩 終點！</p>
+</div>
+
+<div id="message"></div>
+
+<div id="complete-screen">
+    <div class="trophy">🏆</div>
+    <h1>全部通關！</h1>
+    <p>你是真正的邏輯天才！<br>五個關卡全部完美完成，太厲害了！</p>
+    <button id="play-again-btn" onclick="restartGame()">再玩一次</button>
+</div>
+
+<script>
+/*
+ * All level maps verified solvable via simulation.
+ * Minimum solution commands shown in comments for reference.
+ *
+ * dir encoding: 0=right  1=down  2=left  3=up
+ */
+const levels = [
+    {
+        id: 1, name: "初試身手", mode: 'day',
+        hint: "簡單熱身，只需前進！",
+        // Solution (2 cmds): move × 2
+        // Start (0,3) facing right → (2,3) = goal
+        map: [
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 1, 1, 1, 0],
+            [0, 0, 2, 0, 0],
+            [0, 0, 0, 0, 0]
+        ],
+        start: { x:0, y:3, dir:0 }
+    },
+    {
+        id: 2, name: "轉角遇到愛", mode: 'day',
+        hint: "需要轉一個彎，共 6 個指令",
+        // Solution (6 cmds): right, move×2, left, move×2
+        // (0,2)→down×2→(0,4)→right×2→(2,4)=goal
+        map: [
+            [0, 1, 0, 0, 0],
+            [0, 1, 0, 1, 0],
+            [0, 0, 0, 1, 0],
+            [0, 1, 1, 1, 0],
+            [0, 0, 2, 0, 0]
+        ],
+        start: { x:0, y:2, dir:0 }
+    },
+    {
+        id: 3, name: "星空迷路", mode: 'night',
+        hint: "蜿蜒的夜路，共 11 個指令",
+        // Solution (11 cmds): move×2, right, move×3, left, move×2, right, move
+        // (0,4)up→(0,2), right→(3,2), up→(3,0), right→(4,0)=goal
+        map: [
+            [0, 1, 1, 0, 2],
+            [0, 1, 1, 0, 1],
+            [0, 0, 0, 0, 1],
+            [0, 1, 1, 1, 1],
+            [0, 0, 0, 0, 0]
+        ],
+        start: { x:0, y:4, dir:3 }
+    },
+    {
+        id: 4, name: "迷宮螺旋", mode: 'night',
+        hint: "螺旋形迷宮，共 8 個指令",
+        // Solution (8 cmds): move×2, right, move×2, left, move×2
+        // (4,0)down→(4,2), left-dir→(2,2), down→(2,4)=goal
+        map: [
+            [0, 0, 0, 0, 0],
+            [1, 1, 1, 1, 0],
+            [0, 1, 0, 0, 0],
+            [0, 1, 0, 1, 1],
+            [0, 0, 2, 1, 0]
+        ],
+        start: { x:4, y:0, dir:1 }
+    },
+    {
+        id: 5, name: "終極挑戰", mode: 'night',
+        hint: "最難關卡，需要 11 個指令！",
+        // Solution (11 cmds): move×2, left, move×3, right, move×2, right, move
+        // (0,0)down→(0,2), right→(3,2), down→(3,4), left→(2,4)=goal
+        map: [
+            [0, 1, 0, 0, 0],
+            [0, 1, 0, 1, 1],
+            [0, 0, 0, 0, 1],
+            [1, 1, 1, 0, 1],
+            [0, 0, 2, 0, 0]
+        ],
+        start: { x:0, y:0, dir:1 }
+    }
+];
+
+// ─── Direction helpers ───────────────────────────────────────
+const DX = [1, 0, -1, 0];
+const DY = [0, 1, 0, -1];
+const DIR_EMOJI = ['➡️', '⬇️', '⬅️', '⬆️'];
+
+// ─── State ───────────────────────────────────────────────────
+let currentLevelIndex = 0;
+let robotPos = { x:0, y:0, dir:0 };
+let isRunning = false;
+
+// ─── MAP INIT ────────────────────────────────────────────────
+function initMap() {
+    const level = levels[currentLevelIndex];
+    const mapEl = document.getElementById('map');
+    mapEl.innerHTML = '';
+
+    document.body.className = level.mode;
+    document.getElementById('sun-moon').innerHTML = level.mode === 'day' ? '☀️' : '🌙';
+    document.getElementById('level-title').innerText = `關卡 ${level.id}：${level.name}`;
+    document.getElementById('level-hint').innerText  = level.hint;
+
+    robotPos = { x: level.start.x, y: level.start.y, dir: level.start.dir };
+
+    for (let y = 0; y < 5; y++) {
+        for (let x = 0; x < 5; x++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.id = `cell-${x}-${y}`;
+            const v = level.map[y][x];
+            if (v === 1) cell.classList.add('wall');
+            if (v === 2) cell.classList.add('goal');
+            mapEl.appendChild(cell);
+        }
+    }
+    updateProgressBar();
+    updateRobotUI();
+}
+
+function updateProgressBar() {
+    const bar = document.getElementById('progress-bar');
+    bar.innerHTML = '';
+    levels.forEach((_, i) => {
+        const pip = document.createElement('div');
+        pip.className = 'pip' +
+            (i < currentLevelIndex ? ' done' : i === currentLevelIndex ? ' active' : '');
+        bar.appendChild(pip);
+    });
+}
+
+function updateRobotUI() {
+    const level = levels[currentLevelIndex];
+    for (let y = 0; y < 5; y++) {
+        for (let x = 0; x < 5; x++) {
+            const cell = document.getElementById(`cell-${x}-${y}`);
+            if (!cell) continue;
+            if (robotPos.x === x && robotPos.y === y) {
+                cell.innerHTML = `<span>🤖${DIR_EMOJI[robotPos.dir]}</span>`;
+            } else if (level.map[y][x] === 2) {
+                cell.innerHTML = '🚩';
+            } else {
+                cell.innerHTML = '';
+            }
+        }
+    }
+}
+
+// ─── DRAG & DROP ─────────────────────────────────────────────
+function allowDrop(ev) { ev.preventDefault(); }
+
+function dragEnter(ev) {
+    ev.preventDefault();
+    document.getElementById('workspace').classList.add('dragover');
+}
+function dragLeave(ev) {
+    // only remove if leaving the workspace itself, not a child
+    if (!document.getElementById('workspace').contains(ev.relatedTarget)) {
+        document.getElementById('workspace').classList.remove('dragover');
+    }
+}
+
+function drag(ev) {
+    // Transfer cmd type and display info — never rely on element ID
+    ev.dataTransfer.setData("cmd",   ev.target.dataset.cmd);
+    ev.dataTransfer.setData("label", ev.target.innerText.trim());
+    ev.dataTransfer.setData("cls",   ev.target.className);
+}
+
+function drop(ev) {
+    ev.preventDefault();
+    document.getElementById('workspace').classList.remove('dragover');
+
+    const cmd   = ev.dataTransfer.getData("cmd");
+    const label = ev.dataTransfer.getData("label");
+    const cls   = ev.dataTransfer.getData("cls");
+    if (!cmd) return;
+
+    // Hide hint on first block
+    const hint = document.getElementById('ws-hint');
+    if (hint) hint.style.display = 'none';
+
+    const block = document.createElement('div');
+    block.className  = cls;
+    block.dataset.cmd = cmd;
+    block.innerText  = label;
+    block.onclick = function() {
+        if (isRunning) return;       // don't allow removal while program runs
+        this.remove();
+        syncWorkspaceHint();
+        updateCmdCount();
+    };
+    document.getElementById('workspace').appendChild(block);
+    updateCmdCount();
+}
+
+function syncWorkspaceHint() {
+    const blocks = getCommands();
+    const hint   = document.getElementById('ws-hint');
+    if (hint) hint.style.display = blocks.length === 0 ? '' : 'none';
+}
+
+function updateCmdCount() {
+    const n = getCommands().length;
+    const el = document.getElementById('cmd-count');
+    if (el) el.innerText = n > 0 ? `${n} 個指令` : '';
+}
+
+function getCommands() {
+    return Array.from(document.getElementById('workspace').children)
+        .filter(el => el.tagName === 'DIV' && el.dataset.cmd);
+}
+
+function clearWorkspace() {
+    getCommands().forEach(el => el.remove());
+    syncWorkspaceHint();
+    updateCmdCount();
+}
+
+// ─── PROGRAM EXECUTION ───────────────────────────────────────
+async function runProgram() {
+    if (isRunning) return;
+
+    const commands = getCommands();
+    if (commands.length === 0) {
+        showMessage("請先拖入指令！ 👆", "#2196F3");
+        return;
+    }
+
+    isRunning = true;
+    document.getElementById('run-btn').disabled   = true;
+    document.getElementById('reset-btn').disabled = true;
+
+    for (const cmd of commands) {
+        // Highlight active command
+        getCommands().forEach(c => c.classList.remove('executing'));
+        cmd.classList.add('executing');
+
+        const type = cmd.dataset.cmd;
+
+        if (type === 'move') {
+            const nx = robotPos.x + DX[robotPos.dir];
+            const ny = robotPos.y + DY[robotPos.dir];
+
+            // Boundary + wall collision check BEFORE moving
+            if (nx < 0 || nx > 4 || ny < 0 || ny > 4 ||
+                levels[currentLevelIndex].map[ny][nx] === 1) {
+
+                updateRobotUI();
+                await sleep(150);
+                showMessage("💥 撞牆了！\n再想想看邏輯哪裡出錯了", "#e53935");
+                await sleep(2000);
+                getCommands().forEach(c => c.classList.remove('executing'));
+                isRunning = false;
+                clearWorkspace();
+                document.getElementById('run-btn').disabled   = false;
+                document.getElementById('reset-btn').disabled = false;
+                initMap();
+                return;
+            }
+
+            robotPos.x = nx;
+            robotPos.y = ny;
+
+        } else if (type === 'left') {
+            robotPos.dir = (robotPos.dir + 3) % 4;
+        } else if (type === 'right') {
+            robotPos.dir = (robotPos.dir + 1) % 4;
+        }
+        // 'wait' intentionally idles
+
+        updateRobotUI();
+        await sleep(520);
+
+        // Win check after every step
+        if (levels[currentLevelIndex].map[robotPos.y][robotPos.x] === 2) {
+            getCommands().forEach(c => c.classList.remove('executing'));
+            showMessage("🧠✨ 邏輯天才！\n代碼運行完美", "#4CAF50");
+            await sleep(2200);
+            isRunning = false;
+            advanceLevel();
+            return;
+        }
+    }
+
+    // Exhausted all commands without reaching goal
+    getCommands().forEach(c => c.classList.remove('executing'));
+    showMessage("🤔 差一點！\n換個思路再試試？", "#FF9800");
+    isRunning = false;
+    document.getElementById('run-btn').disabled   = false;
+    document.getElementById('reset-btn').disabled = false;
+}
+
+// ─── LEVEL MANAGEMENT ────────────────────────────────────────
+function advanceLevel() {
+    currentLevelIndex++;
+    clearWorkspace();
+    document.getElementById('run-btn').disabled   = false;
+    document.getElementById('reset-btn').disabled = false;
+
+    if (currentLevelIndex >= levels.length) {
+        // All levels complete — show trophy screen
+        document.getElementById('complete-screen').style.display = 'flex';
+        return;
+    }
+    initMap();
+}
+
+function resetLevel() {
+    if (isRunning) return;
+    clearWorkspace();
+    initMap();
+}
+
+function restartGame() {
+    currentLevelIndex = 0;
+    document.getElementById('complete-screen').style.display = 'none';
+    clearWorkspace();
+    document.getElementById('run-btn').disabled   = false;
+    document.getElementById('reset-btn').disabled = false;
+    initMap();
+}
+
+// ─── UTILITIES ───────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+let msgTimer = null;
+function showMessage(txt, color) {
+    const m = document.getElementById('message');
+    m.innerText = txt;
+    m.style.borderLeft = `5px solid ${color}`;
+    m.style.display = 'block';
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(() => { m.style.display = 'none'; }, 2400);
+}
+
+// ─── BOOT ────────────────────────────────────────────────────
+window.onload = initMap;
+</script>
+</body>
+</html>
