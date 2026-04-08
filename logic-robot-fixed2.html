@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>邏輯機器人：維度冒險</title>
+    <style>
+        :root {
+            --move-color: #4CAF50;
+            --turn-color: #2196F3;
+            --func-color: #9C27B0;
+            --bg-day: #87CEEB;
+            --bg-night: #1a1a2e;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            transition: background 1s, color 0.5s;
+            overflow-x: hidden;
+        }
+        body.day   { background: var(--bg-day);   color: #333; }
+        body.night { background: var(--bg-night); color: #fff; }
+
+        #sky-deco {
+            position: absolute;
+            top: 20px; right: 40px;
+            font-size: 50px;
+            transition: transform 1s;
+        }
+
+        header { text-align: center; padding: 20px; }
+        #level-info { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+
+        /* FIX 3: hint text color set black to hide answer on Bonus level.
+           .hidden-hint forces color:#000 — invisible on the dark night background. */
+        #hint-text { font-size: 14px; opacity: 0.8; transition: color 0.3s; }
+        #hint-text.hidden-hint { color: #000 !important; user-select: none; opacity: 1; }
+
+        #game-wrapper {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .panel {
+            background: rgba(255,255,255,0.9);
+            border-radius: 15px;
+            padding: 15px;
+            width: 180px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            color: #333;
+        }
+        body.night .panel { background: rgba(255,255,255,0.15); color: #fff; }
+
+        .panel-title { font-size: 14px; font-weight: bold; margin-bottom: 10px; text-align: center; opacity: 0.7; }
+
+        .block {
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            text-align: center;
+            cursor: grab;
+            user-select: none;
+            transition: transform 0.1s;
+        }
+        .block:active { cursor: grabbing; transform: scale(0.95); }
+        .move { background: var(--move-color); }
+        .turn { background: var(--turn-color); }
+        .func { background: var(--func-color); }
+
+        #workspace {
+            min-height: 350px;
+            border: 3px dashed rgba(0,0,0,0.1);
+            border-radius: 15px;
+            padding: 10px;
+            background: rgba(0,0,0,0.05);
+        }
+        body.night #workspace { border-color: rgba(255,255,255,0.2); }
+        #workspace .block { cursor: pointer; }
+
+        /* Highlight the currently-executing block with a gold glow */
+        #workspace .block.executing {
+            box-shadow: 0 0 0 4px gold, 0 0 15px gold;
+        }
+
+        #map {
+            display: grid;
+            grid-template-columns: repeat(5, 60px);
+            grid-template-rows: repeat(5, 60px);
+            gap: 4px;
+            background: rgba(0,0,0,0.1);
+            padding: 8px;
+            border-radius: 12px;
+        }
+        .cell {
+            width: 60px; height: 60px;
+            background: rgba(255,255,255,0.4);
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 30px;
+        }
+        .wall { background: #444 !important; }
+        .goal { background: #FFD700 !important; animation: pulse 1s infinite; }
+
+        /* FIX 8 (CSS): Bonus level — all cells pitch-black, goal tile also black
+           so the flag and golden highlight are invisible.
+           Using font-size:0 on .goal hides the emoji text without broken ::after tricks. */
+        body.level-bonus .cell {
+            background: #0a0a1a !important;
+            border: 1px solid #1a1a3a;
+        }
+        body.level-bonus .goal {
+            background: #0a0a1a !important;
+            animation: none;
+            font-size: 0 !important;   /* hides the 🚩 emoji reliably */
+        }
+
+        .controls { margin-top: 20px; display: flex; gap: 10px; }
+        button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 25px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        #run-btn   { background: #ff5722; color: white; }
+        #reset-btn { background: #78909c; color: white; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        #msg-overlay {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px 40px;
+            border-radius: 15px;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            display: none;
+            z-index: 100;
+            text-align: center;
+            line-height: 1.5;
+        }
+
+        @keyframes pulse {
+            0%   { transform: scale(1); }
+            50%  { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="day">
+
+    <div id="sky-deco">☀️</div>
+
+    <header>
+        <div id="level-info">關卡 1</div>
+        <div id="hint-text">加載中...</div>
+    </header>
+
+    <div id="game-wrapper">
+        <div class="panel">
+            <div class="panel-title">指令庫</div>
+            <div class="block move" draggable="true" ondragstart="drag(event)" data-cmd="move">⬆️ 前進</div>
+            <div class="block turn" draggable="true" ondragstart="drag(event)" data-cmd="left">↺ 左轉</div>
+            <div class="block turn" draggable="true" ondragstart="drag(event)" data-cmd="right">↻ 右轉</div>
+            <div class="block func" draggable="true" ondragstart="drag(event)" data-cmd="wait">⏸ 等待</div>
+        </div>
+
+        <div class="panel" style="width: 200px;">
+            <div class="panel-title">程式碼 (點擊可刪除)</div>
+            <div id="workspace" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+        </div>
+
+        <div id="map"></div>
+    </div>
+
+    <div class="controls">
+        <button id="run-btn"   onclick="runProgram()">▶ 啟動機器人</button>
+        <button id="reset-btn" onclick="resetGame()">↩ 重置位置</button>
+    </div>
+
+    <div id="msg-overlay"></div>
+
+    <script>
+        /*
+         * DIRECTION CONVENTION:  index → facing
+         *   0 = Right (+x)   1 = Down (+y)   2 = Left (-x)   3 = Up (-y)
+         */
+        const dx       = [1,  0, -1, 0];
+        const dy       = [0,  1,  0, -1];
+        const dirIcons = ['➡️','⬇️','⬅️','⬆️'];
+
+        const levels = [
+            // ── Level 1 ─────────────────────────────────────────────────────
+            {
+                id: 1, name: "唯一路徑", mode: 'day', deco: '☀️',
+                hint: "沿著走道前進找到終點！",
+                /*
+                 * Map legend: 0=open  1=wall  2=goal
+                 * Goal (2,2).  Start (0,4) facing Right (dir 0).
+                 * Solution: move×3, left, move×2, left, move×1
+                 */
+                map: [
+                    [1, 1, 1, 1, 1],
+                    [1, 1, 1, 1, 1],
+                    [1, 1, 2, 0, 1],
+                    [0, 1, 1, 0, 1],
+                    [0, 0, 0, 0, 1]
+                ],
+                start: { x: 0, y: 4, dir: 0 }
+            },
+
+            // ── Level 2 ─────────────────────────────────────────────────────
+            {
+                id: 2, name: "轉角實驗", mode: 'day', deco: '☁️',
+                hint: "嘗試運用你的轉向指令吧！",
+                /*
+                 * Goal (4,2).  Start (0,0) facing Down (dir 1).
+                 */
+                map: [
+                    [0, 1, 0, 0, 0],
+                    [0, 1, 0, 1, 0],
+                    [0, 0, 0, 1, 2],
+                    [0, 1, 1, 1, 0],
+                    [0, 0, 0, 0, 0]
+                ],
+                start: { x: 0, y: 0, dir: 1 }
+            },
+
+            // ── Bonus Level ──────────────────────────────────────────────────
+            {
+                id: 'bonus', name: "隱藏傳送門", mode: 'night', deco: '🌙',
+                /*
+                 * FIX 3: hint is deliberately unhelpful text — the real answer
+                 * is hidden (text rendered black-on-black via .hidden-hint CSS).
+                 */
+                hint: "前方是虛無。試著找到另一條路！",
+                /*
+                 * FIX 4 + FIX 9/12 (start far from goal, portal-only win):
+                 *   Start  (2,4) facing Up (dir 3) — bottom of the corridor.
+                 *   Goal   (2,2) — mid corridor, reachable ONLY via portal.
+                 *   Portal (2,0) — triggered when robot steps onto it facing Up.
+                 *   After teleport → robot lands on (2,2) → checkWin fires.
+                 *
+                 *   CRITICAL: goal tile (2,2) is set to value 2 in the map, but
+                 *   the direct path from start to goal is BLOCKED because the
+                 *   portal intercepts movement to (2,0) before it reaches (2,2),
+                 *   and moving straight up from (2,4) would pass through (2,3),
+                 *   (2,2) which IS the goal — so we keep (2,3) as a wall to
+                 *   force the robot to the portal route only.
+                 *
+                 *   Map layout:
+                 *     row 0: [1,1, 0 ,1,1]  ← (2,0) portal tile (open path)
+                 *     row 1: [1,1, 0 ,1,1]  ← (2,1) open path
+                 *     row 2: [1,1, 2 ,1,1]  ← (2,2) GOAL (only reachable via portal)
+                 *     row 3: [1,1, 1 ,1,1]  ← (2,3) WALL — blocks direct walk to goal
+                 *     row 4: [1,1, 0 ,1,1]  ← (2,4) START
+                 *
+                 *   Solution: move↑×3 (robot crosses portal at (2,0)) → teleport to (2,2) → win.
+                 *   Wrong attempt: moving down or sideways → wall collision.
+                 */
+                map: [
+                    [1, 1, 0, 1, 1],
+                    [1, 1, 0, 1, 1],
+                    [1, 1, 2, 1, 1],
+                    [1, 1, 1, 1, 1],
+                    [1, 1, 0, 1, 1]
+                ],
+                start: { x: 2, y: 4, dir: 3 },  /* facing Up already */
+                isBonus: true
+            }
+        ];
+
+        let currentLevelIdx = 0;
+        let robot        = { x: 0, y: 0, dir: 0 };
+        let isRunning    = false;
+        let resetTimer   = null;   /* FIX: track pending reset so initLevel can cancel it */
+        let advanceTimer = null;   /* FIX 5: was undeclared — caused implicit global & leak */
+
+        /* ── Level initialisation ─────────────────────────────────────────── */
+        function initLevel() {
+            /* Cancel any in-flight timers from the previous level */
+            clearTimeout(resetTimer);
+            clearTimeout(advanceTimer);
+
+            const level = levels[currentLevelIdx];
+
+            /* Apply day/night class, then add bonus modifier if needed */
+            document.body.className = level.mode;
+            if (level.isBonus) document.body.classList.add('level-bonus');
+
+            document.getElementById('sky-deco').innerText = level.deco;
+
+            /* FIX 1+2: show "關卡 N" for normal levels, "🎁 Bonus" for bonus */
+            document.getElementById('level-info').innerText =
+                level.isBonus ? '🎁 Bonus' : `關卡 ${level.id}：${level.name}`;
+
+            /* FIX 3: hide hint text on Bonus by making it black-on-black */
+            const hintEl = document.getElementById('hint-text');
+            hintEl.innerText = level.hint;
+            if (level.isBonus) {
+                hintEl.classList.add('hidden-hint');
+            } else {
+                hintEl.classList.remove('hidden-hint');
+            }
+
+            robot = { ...level.start };
+
+            /* Build the map grid */
+            const mapEl = document.getElementById('map');
+            mapEl.innerHTML = '';
+            for (let y = 0; y < 5; y++) {
+                for (let x = 0; x < 5; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.id = `cell-${x}-${y}`;
+
+                    /* On the Bonus level every cell looks the same (pitch-black).
+                     * Wall/goal classes are still added for logic purposes but the
+                     * CSS overrides the visual so nothing is revealed to the player. */
+                    if (level.map[y][x] === 1) cell.classList.add('wall');
+                    if (level.map[y][x] === 2) {
+                        cell.classList.add('goal');
+                        if (!level.isBonus) cell.innerText = '🚩';
+                    }
+                    mapEl.appendChild(cell);
+                }
+            }
+            renderRobot();
+        }
+
+        /* ── Render robot position ────────────────────────────────────────── */
+        function renderRobot() {
+            const level = levels[currentLevelIdx];
+            document.querySelectorAll('.cell').forEach(c => {
+                if (c.innerText.includes('🤖')) {
+                    const [, cx, cy] = c.id.split('-').map(Number);
+                    /* Restore flag on non-Bonus goal tiles; leave Bonus tiles blank */
+                    c.innerText = (!level.isBonus && level.map[cy][cx] === 2) ? '🚩' : '';
+                }
+            });
+            const robotCell = document.getElementById(`cell-${robot.x}-${robot.y}`);
+            if (robotCell) robotCell.innerText = `🤖${dirIcons[robot.dir]}`;
+        }
+
+        /* ── Drag & drop ──────────────────────────────────────────────────── */
+        function allowDrop(ev) { ev.preventDefault(); }
+
+        function drag(ev) {
+            ev.dataTransfer.setData('html', ev.target.outerHTML);
+        }
+
+        function drop(ev) {
+            ev.preventDefault();
+            const div = document.createElement('div');
+            div.innerHTML = ev.dataTransfer.getData('html');
+            const newBlock = div.firstChild;
+            newBlock.id = 'ws-' + Date.now();
+            newBlock.removeAttribute('ondragstart');
+            newBlock.draggable = false;
+            newBlock.onclick = function () { if (!isRunning) this.remove(); };
+            document.getElementById('workspace').appendChild(newBlock);
+        }
+
+        /* ── Main execution loop ──────────────────────────────────────────── */
+        async function runProgram() {
+            if (isRunning) return;
+
+            const commands = Array.from(document.getElementById('workspace').children);
+            if (commands.length === 0) {
+                showMsg('請先拖入一些指令積木！');
+                return;
+            }
+
+            isRunning = true;
+            toggleButtons(false);
+            clearTimeout(resetTimer);   /* cancel any pending auto-reset */
+
+            for (const cmdBlock of commands) {
+                /* Highlight the currently running block */
+                Array.from(document.getElementById('workspace').children)
+                    .forEach(b => b.classList.remove('executing'));
+                cmdBlock.classList.add('executing');
+
+                const type = cmdBlock.dataset.cmd;
+                await sleep(600);
+
+                if (type === 'move') {
+                    const nx = robot.x + dx[robot.dir];
+                    const ny = robot.y + dy[robot.dir];
+                    const level = levels[currentLevelIdx];
+
+                    /* FIX 9/12: Bonus portal — intercept movement to (2,0) when
+                     * facing Up (dir 3).  The wall at (2,3) prevents reaching the
+                     * goal directly from below, so this is the only valid win path. */
+                    if (level.isBonus && nx === 2 && ny === 0 && robot.dir === 3) {
+                        showMsg('🌀 偵測到維度異常... 傳送啟動！', '#9C27B0', 1000);
+                        await sleep(1000);
+                        robot.x = 2;
+                        robot.y = 2;
+                        renderRobot();
+                        await sleep(300);
+                        cmdBlock.classList.remove('executing');
+                        /* FIX 5: checkWin uses advanceTimer (now declared) */
+                        if (checkWin()) return;
+                        /* Teleport succeeded but somehow not on goal — shouldn't happen */
+                        stopRunning(false);
+                        return;
+                    }
+
+                    /* Boundary + wall collision */
+                    if (nx < 0 || nx > 4 || ny < 0 || ny > 4 || level.map[ny][nx] === 1) {
+                        showMsg('💥 哎呀！撞牆了...<br>再調整一下指令順序？', '#e53935');
+                        cmdBlock.classList.remove('executing');
+                        stopRunning(true);
+                        return;
+                    }
+
+                    robot.x = nx;
+                    robot.y = ny;
+
+                } else if (type === 'left') {
+                    robot.dir = (robot.dir + 3) % 4;
+                } else if (type === 'right') {
+                    robot.dir = (robot.dir + 1) % 4;
+                }
+                /* 'wait' — consume a tick, do nothing */
+
+                renderRobot();
+                cmdBlock.classList.remove('executing');
+
+                if (checkWin()) return;
+            }
+
+            /* All commands exhausted without reaching the goal */
+            showMsg('🏁 程式執行完畢！<br>但機器人沒到終點，再試一次？', '#FF9800');
+            stopRunning(true);
+        }
+
+        /* ── Win detection ────────────────────────────────────────────────── */
+        function checkWin() {
+            if (levels[currentLevelIdx].map[robot.y][robot.x] !== 2) return false;
+
+            /* Clear any executing highlight */
+            Array.from(document.getElementById('workspace').children)
+                .forEach(b => b.classList.remove('executing'));
+
+            const isBonus = levels[currentLevelIdx].isBonus;
+            /* FIX 7: pass longer duration for win messages so they stay visible
+             * through the 2500 ms advance delay that follows */
+            showMsg(
+                isBonus ? '🎁 太神了！<br>你發現了隱藏的後門路徑！'
+                        : '🌟 成功通關！<br>你的邏輯完美無瑕！',
+                '#4CAF50',
+                3000   /* stay on screen until the next level loads */
+            );
+
+            isRunning = false;
+            toggleButtons(true);
+
+            /* FIX 5: use the declared advanceTimer variable */
+            advanceTimer = setTimeout(() => {
+                currentLevelIdx++;
+                if (currentLevelIdx >= levels.length) {
+                    showMsg('🏆 恭喜！你已完成所有關卡！', 'gold', 5000);
+                } else {
+                    /* FIX 10: clear workspace here (inside advanceTimer) before initLevel */
+                    document.getElementById('workspace').innerHTML = '';
+                    initLevel();
+                }
+            }, 2500);
+
+            return true;
+        }
+
+        /* ── Stop / reset helpers ─────────────────────────────────────────── */
+        function stopRunning(doReset = false) {
+            isRunning = false;
+            toggleButtons(true);
+            Array.from(document.getElementById('workspace').children)
+                .forEach(b => b.classList.remove('executing'));
+
+            if (doReset) {
+                /* FIX: store reference so initLevel can cancel a stale reset */
+                resetTimer = setTimeout(() => {
+                    robot = { ...levels[currentLevelIdx].start };
+                    renderRobot();
+                }, 1500);
+            }
+        }
+
+        function resetGame() {
+            if (isRunning) return;
+            clearTimeout(resetTimer);
+            robot = { ...levels[currentLevelIdx].start };
+            renderRobot();
+        }
+
+        function toggleButtons(state) {
+            document.getElementById('run-btn').disabled   = !state;
+            document.getElementById('reset-btn').disabled = !state;
+        }
+
+        /* ── Message overlay ──────────────────────────────────────────────── */
+        /* FIX 6: clearTimeout prevents overlapping hide-timers.
+         * FIX 7: accept duration param so win messages can stay visible longer. */
+        function showMsg(txt, color = '#333', duration = 2000) {
+            const overlay = document.getElementById('msg-overlay');
+            overlay.innerHTML = txt;
+            overlay.style.display = 'block';
+            overlay.style.borderTop = `5px solid ${color}`;
+            clearTimeout(overlay._hideTimer);
+            overlay._hideTimer = setTimeout(() => {
+                overlay.style.display = 'none';
+            }, duration);
+        }
+
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+        window.onload = initLevel;
+    </script>
+</body>
+</html>
